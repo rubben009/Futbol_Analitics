@@ -1,6 +1,6 @@
-streamlit
 st-gsheets-connection
 pandas
 numpy
 plotly.express
 plotly.graph_object
+streamlit
