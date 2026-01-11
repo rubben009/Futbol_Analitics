@@ -54,10 +54,11 @@ def cargar_datos_equipo(nombre_hoja,gid):
     # Reseteamos índice para trabajar con columnas normales
     df_long = df_long.reset_index()
     df_long.rename(columns={'level_2': 'Jornada'}, inplace=True)
+    df_long["Jormnada"]=pd.to_numeric(df_long['Jornada'], errors='coerce')
 
     # 4. LIMPIEZA DE DATOS NUMÉRICOS
     # Convertimos todo a números; lo que no sea número (texto, vacíos) será 0
-    cols_stats = ['C_NC', 'T', 'S', 'G', 'A', 'DA', 'R']
+    cols_stats = ['Jornada','C_NC', 'T', 'S', 'G', 'A', 'DA', 'R']
     for col in cols_stats:
         df_long[col] = pd.to_numeric(df_long[col], errors='coerce').fillna(0)
 
@@ -98,7 +99,7 @@ def cargar_datos_equipo(nombre_hoja,gid):
 
     if not jornadas_activas.empty:
         # La jornada actual es el número más alto registrado 
-        jornada_actual = int(jornadas_activas.index.max())
+        jornada_actual = jornadas_activas.index.astype(int).max()
         
         # Los partidos jugados son la CANTIDAD de jornadas activas
         partidos_jugados = len(jornadas_activas)
@@ -175,14 +176,102 @@ else:
     # --- ENCABEZADO Y KPIs ---
     st.title(f"Informe: {equipo_seleccionado}")
     
-    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-    kpi1.metric("Goles a Favor", int(df_stats['Goles'].sum()))
-    kpi2.metric("Tarjetas Amarillas", int(df_stats['Amarillas'].sum()))
-    kpi3.metric("Plantilla", f"{len(df_stats)} jug.")
-    kpi4.metric("Jornadas ", jornada_actual)
-    
+    kpi1, kpi2, kpi3, kpi4, kpi5, kpi6 = st.columns(6)
+    kpi1.metric("Goles a Favor", int(df_stats[df_stats['Posición'] != 'Portero']['Goles'].sum()))
+    kpi2.metric("Goles en Contra", int(df_stats[df_stats['Posición'] == 'Portero']['Goles'].sum()))
+    kpi3.metric("Tarjetas Amarillas", int(df_stats['Amarillas'].sum()))
+    kpi4.metric("Plantilla", f"{len(df_stats)} jug.")
+    kpi5.metric("Jornadas ", jornada_actual)
+    kpi6.metric("Partidos Jugados ", partidos_jugados)
 
     st.markdown("---")
+
+
+# --- SECCIÓN: DISTRIBUCIÓN DE MINUTOS Y PARTIDOS ---
+st.subheader("📊 Distribución de la Plantilla (Titular vs Suplente)")
+
+# Calculamos los Partidos de Suplente (Total Jugados - Titularidades)
+# Aseguramos que existan las columnas con los nombres correctos (revisa tu rename anterior)
+df_stats['Partidos suplente'] = df_stats['Jugados'] - df_stats['Titular']
+
+# Creamos dos pestañas para separar Minutos de Partidos
+tab1, tab2 = st.tabs(["⏱️ Minutos", "⚽ Partidos"])
+
+# --- GRÁFICA 1: MINUTOS ---
+with tab1:
+    # Ordenamos por minutos totales para que la gráfica se vea de mayor a menor
+    df_min = df_stats.sort_values('Minutos totales', ascending=False)
+    
+    fig_min = go.Figure()
+    
+    # Capa 1: Minutos de Titular (Verde) - Va abajo
+    fig_min.add_trace(go.Bar(
+        name='Titular',
+        x=df_min['Nombre'],
+        y=df_min['Minutos titular'],
+        marker_color='#2ecc71', # Verde
+        text=df_min['Minutos titular'], # Muestra el dato
+        textposition='auto'
+    ))
+    
+    # Capa 2: Minutos de Suplente (Naranja) - Va encima
+    fig_min.add_trace(go.Bar(
+        name='Suplente',
+        x=df_min['Nombre'],
+        y=df_min['Minutos suplente'],
+        marker_color='#f39c12', # Naranja
+        text=df_min['Minutos suplente'],
+        textposition='auto'
+    ))
+    
+    fig_min.update_layout(
+        barmode='stack', # ESTO ES LO QUE APILA LAS BARRAS
+        title="Minutos Totales (Titular + Suplente)",
+        xaxis_title="Jugador",
+        yaxis_title="Minutos",
+        template="plotly_dark",
+        xaxis={'categoryorder':'total descending'} # Asegura el orden visual
+    )
+    
+    st.plotly_chart(fig_min, use_container_width=True)
+
+# --- GRÁFICA 2: PARTIDOS ---
+with tab2:
+    # Ordenamos por partidos jugados
+    df_part = df_stats.sort_values('Jugados', ascending=False)
+    
+    fig_part = go.Figure()
+    
+    # Capa 1: Partidos Titular (Verde)
+    fig_part.add_trace(go.Bar(
+        name='Titular',
+        x=df_part['Nombre'],
+        y=df_part['Titular'],
+        marker_color='#2ecc71',
+        text=df_part['Titular'],
+        textposition='auto'
+    ))
+    
+    # Capa 2: Partidos Suplente (Naranja)
+    fig_part.add_trace(go.Bar(
+        name='Suplente',
+        x=df_part['Nombre'],
+        y=df_part['Partidos suplente'],
+        marker_color='#f39c12',
+        text=df_part['Partidos suplente'],
+        textposition='auto'
+    ))
+    
+    fig_part.update_layout(
+        barmode='stack',
+        title="Partidos Disputados (Titular + Suplente)",
+        xaxis_title="Jugador",
+        yaxis_title="Cantidad de Partidos",
+        template="plotly_dark",
+        xaxis={'categoryorder':'total descending'}
+    )
+    
+    st.plotly_chart(fig_part, use_container_width=True)
 
     # --- SECCIÓN 1: SEMÁFORO DE MINUTOS ---
     st.subheader("🚦 Estado de la Plantilla (Minutos Jugados)")
@@ -269,7 +358,7 @@ else:
     
     with c_goles:
         st.subheader("⚽ Goleadores")
-        df_goles = df_stats[df_stats['Goles'] > 0].sort_values('Goles', ascending=True)
+        df_goles = df_stats[(df_stats['Posición'] != 'Portero') & df_stats['Goles'] > 0].sort_values('Goles', ascending=True)
         if not df_goles.empty:
             fig_g = px.bar(df_goles, x='Goles', y=df_goles["Nombre"], orientation='h',
                            text='Goles', color='Goles', color_continuous_scale='Blues',
@@ -289,224 +378,299 @@ else:
         else:
             st.info("Equipo limpio: 0 tarjetas.")
 
-    # --- SECCIÓN 3: DETALLE JUGADOR ---
-    st.markdown("---")
-    jugador = st.selectbox("🔍 Analizar Jugador Específico", df_stats["Nombre"])
+# --- SECCIÓN 3: DETALLE JUGADOR ---
+st.markdown("---")
+jugador = st.selectbox("🔍 Analizar Jugador Específico", df_stats["Nombre"])
+
+if jugador:
+    # Cogemos solo las filas de ese jugador en el histórico (df_long)
+    datos_jugador = df_full[df_full['Nombre'] == jugador].copy()
     
-    if jugador:
-        # Cogemos solo las filas de ese jugador en el histórico (df_long)
-        datos_jugador = df_full[df_full['Nombre'] == jugador].copy()
-        
-        # ORDEN: Aseguramos que las jornadas salgan en orden (1, 2, 3...)
-        datos_jugador = datos_jugador.sort_values('Jornada')
+    # ORDEN: Aseguramos que las jornadas salgan en orden (1, 2, 3...)
+    datos_jugador = datos_jugador.sort_values('Jornada')
 
-        fig_evo = go.Figure()
-        fig_evo.add_trace(go.Bar(name='Titular', x=datos_jugador['Jornada'], y=datos_jugador['T'], marker_color='#2ecc71'))
-        fig_evo.add_trace(go.Bar(name='Suplente',x=datos_jugador['Jornada'], y=datos_jugador['S'], marker_color='#f1c40f'))
-        
-        # Configuración del diseño
-        fig_evo.update_layout(
-            barmode='stack', title=f"Minutos por Jornada: {jugador}", 
-            template="plotly_dark", yaxis_title="Minutos",
-            xaxis_title="Jornada",
-            # Esto hace que en el eje X ponga "J1, J2..." automáticamente
-            xaxis=dict(tickmode='linear', tick0=1, dtick=1,tickprefix="J"))
-        
-        st.plotly_chart(fig_evo, use_container_width=True)
-
-    # --- SECCIÓN 4: COMPARADOR HEAD-TO-HEAD ---
-    st.markdown("---")
-    st.subheader("⚔️ Comparador de Jugadores")
+    fig_evo = go.Figure()
+    fig_evo.add_trace(go.Bar(name='Titular', x=datos_jugador['Jornada'], y=datos_jugador['T'], marker_color='#2ecc71'))
+    fig_evo.add_trace(go.Bar(name='Suplente',x=datos_jugador['Jornada'], y=datos_jugador['S'], marker_color='#f1c40f'))
     
-    col_sel1, col_sel2 = st.columns(2)
-    with col_sel1:
-        p1 = st.selectbox("Jugador A", df_stats["Nombre"], index=0)
-    with col_sel2:
-        # Intentamos que por defecto seleccione al segundo de la lista
-        p2 = st.selectbox("Jugador B", df_stats["Nombre"], index=1 if len(df_stats) > 1 else 0)
+    # Configuración del diseño
+    fig_evo.update_layout(
+        barmode='stack', title=f"Minutos por Jornada: {jugador}", 
+        template="plotly_dark", yaxis_title="Minutos",
+        xaxis_title="Jornada",
+        yaxis=dict(range=[0, t_partido]),
+        # Esto hace que en el eje X ponga "J1, J2..." automáticamente
+        xaxis=dict(tickmode='linear', tick0=1, dtick=1,tickprefix="J"))
+    
+    st.plotly_chart(fig_evo, use_container_width=True)
 
-    if p1 and p2:
-        # Extraer datos
-        stats_p1 = df_stats[df_stats['Nombre'] == p1].copy()
-        stats_p2 = df_stats[df_stats['Nombre'] == p2].copy()
-      
-        # 1. TABLA COMPARATIVA CENTRAL
-        # Usamos columnas para crear un efecto de "Marcador"
-        c_p1, c_metric, c_p2 = st.columns([1, 1, 1])
-        
-        # Función auxiliar para mostrar métricas con colores
-        def mostrar_comparacion(label, val1, val2, es_mejor_alto=True):
-            # Aseguramos que si llega una Serie de Pandas, sacamos su valor escalar
-            if isinstance(val1, pd.Series):
-                val1 = val1.values[0]
-            if isinstance(val2, pd.Series):
-                val2 = val2.values[0]
-                
-            delta_1 = val1 - val2
-            delta_2 = val2 - val1
+# --- SECCIÓN 4: COMPARADOR HEAD-TO-HEAD ---
+st.markdown("---")
+st.subheader("⚔️ Comparador de Jugadores")
+
+col_sel1, col_sel2 = st.columns(2)
+with col_sel1:
+    p1 = st.selectbox("Jugador A", df_stats["Nombre"], index=0)
+with col_sel2:
+    # Intentamos que por defecto seleccione al segundo de la lista
+    p2 = st.selectbox("Jugador B", df_stats["Nombre"], index=1 if len(df_stats) > 1 else 0)
+
+if p1 and p2:
+    # Extraer datos
+    stats_p1 = df_stats[df_stats['Nombre'] == p1].copy()
+    stats_p2 = df_stats[df_stats['Nombre'] == p2].copy()
+    
+    # 1. TABLA COMPARATIVA CENTRAL
+    # Usamos columnas para crear un efecto de "Marcador"
+    c_p1, c_metric, c_p2 = st.columns([1, 1, 1])
+    
+    # Función auxiliar para mostrar métricas con colores
+    def mostrar_comparacion(label, val1, val2, es_mejor_alto=True):
+        # Aseguramos que si llega una Serie de Pandas, sacamos su valor escalar
+        if isinstance(val1, pd.Series):
+            val1 = val1.values[0]
+        if isinstance(val2, pd.Series):
+            val2 = val2.values[0]
             
-            # Definir color según quien gana
-            color_p1 = "normal"
-            color_p2 = "normal"
+        delta_1 = val1 - val2
+        delta_2 = val2 - val1
+        
+        # Definir color según quien gana
+        color_p1 = "normal"
+        color_p2 = "normal"
+        
+        if val1 != val2:
+            if (es_mejor_alto and val1 > val2) or (not es_mejor_alto and val1 < val2):
+                color_p1 = "off" # Streamlit usa "off" o "inverse" para resaltar verde en deltas
+                color_p2 = "normal" # Rojo/Gris
+            else:
+                color_p1 = "normal"
+                color_p2 = "off"
+
+        c_p1.metric(label, int(val1), delta=int(delta_1), delta_color=color_p1)
+        c_p2.metric(label, int(val2), delta=int(delta_2), delta_color=color_p2)
+        c_metric.markdown(f"<h3 style='text-align: center; vertical-align: middle; margin-top: 20px'>{label}</h3>", unsafe_allow_html=True)
+
+    # Renderizar métricas
+    mostrar_comparacion("Minutos Totales", stats_p1['Minutos totales'], stats_p2['Minutos totales'])
+    st.write("") # Espaciador
+    mostrar_comparacion("Goles", stats_p1['Goles'], stats_p2['Goles'])
+    st.write("")
+    mostrar_comparacion("Amarillas", stats_p1['Amarillas'], stats_p2['Amarillas'], es_mejor_alto=False) # Menos es mejor
+
+    # 2. GRÁFICO DE BARRAS COMPARATIVO
+    st.write("")
+    st.write("")
+    
+    fig_comp = go.Figure()
+    metricas = ['Min. Titular', 'Min. Suplente', 'Goles (x100)', 'Amarillas (x100)']
+    
+    # Escalamos goles y amarillas x100 solo para que se vean en la gráfica junto a los minutos
+    # (Esto es un truco visual, puedes quitarlo si prefieres normalizar de otra forma)
+    vals_1 = [stats_p1['Minutos titular'].values[0], stats_p1['Minutos suplente'].values[0], stats_p1['Goles'].values[0]*100, stats_p1['Amarillas'].values[0]*100]
+    vals_2 = [stats_p2['Minutos titular'].values[0], stats_p2['Minutos suplente'].values[0], stats_p2['Goles'].values[0]*100, stats_p2['Amarillas'].values[0]*100]
+
+    fig_comp.add_trace(go.Bar(name=p1, x=metricas, y=vals_1, marker_color='#3498db'))
+    fig_comp.add_trace(go.Bar(name=p2, x=metricas, y=vals_2, marker_color='#e74c3c'))
+
+    fig_comp.update_layout(barmode='group', title="Comparativa Directa", template="plotly_dark")
+    st.plotly_chart(fig_comp, use_container_width=True)
+    st.caption("*Nota: Goles y Amarillas multiplicados x100 para visibilidad gráfica")
+
+
+    # --- EXTRA 1: RADAR CHART (Sustituye el gráfico de barras del comparador por esto) ---
+    st.write("---")
+    st.subheader("🕸️ Comparativa Visual (Radar)")
+    
+    # 1. Normalización de datos (0-100) respecto al MÁXIMO DEL EQUIPO
+    # Esto es vital para que el gráfico se vea bien
+    def normalizar(valor, columna):
+        max_val = df_stats[columna].max()
+        if max_val == 0: return 0
+        return (valor / max_val) * 100
+
+    metricas_radar = ['Minutos totales', 'Goles', '% Jugado (Total)', 'Titular']
+    nombres_radar = ['Minutos', 'Goles', '% Participación', 'Titularidades']
+    
+    vals_p1_norm = [normalizar(stats_p1[m].values[0], m) for m in metricas_radar]
+    vals_p2_norm = [normalizar(stats_p2[m].values[0], m) for m in metricas_radar]
+    
+    # Cerrar el círculo del radar añadiendo el primer valor al final
+    vals_p1_norm += [vals_p1_norm[0]]
+    vals_p2_norm += [vals_p2_norm[0]]
+    nombres_radar += [nombres_radar[0]]
+
+    fig_radar = go.Figure()
+
+    fig_radar.add_trace(go.Scatterpolar(
+            r=vals_p1_norm,
+            theta=nombres_radar,
+            fill='toself',
+            name=p1,
+            line_color='#3498db'
+    ))
+    fig_radar.add_trace(go.Scatterpolar(
+            r=vals_p2_norm,
+            theta=nombres_radar,
+            fill='toself',
+            name=p2,
+            line_color='#e74c3c'
+    ))
+
+    fig_radar.update_layout(
+        polar=dict(
+        radialaxis=dict(
+            visible=True,
+            range=[0, 100] # Siempre de 0 a 100% relativo al equipo
+        )),
+        showlegend=True,
+        template="plotly_dark",
+        title="Comparativa Relativa (Escala 0-100 sobre el mejor del equipo)"
+    )
+    st.plotly_chart(fig_radar, use_container_width=True)
+
+
+    # --- EXTRA 1: GRÁFICO DE EFICIENCIA (SCATTER PLOT) ---
+    st.subheader("🎯 Eficiencia: Goles vs Minutos")
+    
+    # Filtramos para no ensuciar el gráfico con gente que no juega
+    df_eficiencia = df_stats[(df_stats['Minutos totales'] > 90) & (df_stats['Posición'] != 'Portero')].copy() 
+    
+    # Calculamos Goles por 90 min para el tamaño de la burbuja o el color
+    df_eficiencia['Goles_90'] = (df_eficiencia['Goles'] / df_eficiencia['Minutos totales']) * 90
+    
+    fig_eff = px.scatter(df_eficiencia, 
+                        x='Minutos totales', 
+                        y='Goles',
+                        size='Goles_90', # El tamaño de la bola es su promedio goleador
+                        color='Goles',
+                        hover_name=df_eficiencia["Nombre"],
+                        text=df_eficiencia["Nombre"],
+                        title="Relación Minutos jugados vs Goles marcados (Tamaño = Goles/90min)",
+                        labels={'min_tot': 'Minutos Totales', 'goles': 'Goles Totales'},
+                        template="plotly_dark")
+    
+    fig_eff.update_traces(textposition='top center')
+    st.plotly_chart(fig_eff, use_container_width=True)
+
+
+
+    
+    # --- EXTRA 3: RACHA ÚLTIMOS 5 PARTIDOS ---
+    st.subheader("🔥 Estado de Forma (Últimos 5 partidos)")
+    
+    # SELECCIONAR LOS ÚLTIMOS 5 PARTIDOS JUGADOS HASTA HOY
+    # Filtramos jornadas anteriores o iguales a la actual y cogemos las últimas 5
+    datos_jugador['Jornada'] = pd.to_numeric(datos_jugador['Jornada'], errors='coerce')
+    last_5_df = datos_jugador[datos_jugador['Jornada'] <= jornada_actual].sort_values('Jornada').tail(5)
+
+    # CÁLCULOS
+    # Calculamos la suma de minutos (T + S) fila a fila
+    last_5_df['Minutos_Partido'] = last_5_df['T'] + last_5_df['S']
+
+    min_last_5 = last_5_df['Minutos_Partido'].sum()
+    # Calculamos el máximo posible basándonos en cuántos partidos ha encontrado (pueden ser menos de 5 si estamos en la jornada 3)
+    num_partidos_rango = len(last_5_df)
+    max_possible_5 = num_partidos_rango * t_partido 
+
+    if max_possible_5 > 0:
+        pct_forma = (min_last_5 / max_possible_5) * 100
+    else:
+        pct_forma = 0
+
+    # VISUALIZACIÓN
+    c_forma1, c_forma2 = st.columns([1, 3])
+
+    # Usamos int() para limpiar el visualizado
+    c_forma1.metric("Minutos (Últ. 5)", int(min_last_5), f"{int(pct_forma)}% Disp.")
+
+    # Mini gráfico de tendencia (Sparkline)
+    # Usamos el DF last_5_df que ya tiene los datos listos
+    fig_spark = px.line(last_5_df,x='Jornada', y='Minutos_Partido', markers=True, template="plotly_dark", title="Tendencia de minutos")
+
+    fig_spark.update_layout(height=150, margin=dict(l=20, r=20, t=30, b=20), yaxis_range=[0, 100], # Un poco más de 90 para que no corte el punto
+        xaxis=dict(tickmode='linear', dtick=1, tickprefix="J")) # Para que ponga J11, J12...
+    c_forma2.plotly_chart(fig_spark, use_container_width=True)
+    
+
+    # ... tu código de carga y cálculos donde generas df_stats ...
+
+    st.subheader("Verificación de Datos Calculados (df_stats)")
+
+    # Opción Recomendada: Tabla interactiva (puedes ordenar y filtrar)
+    st.dataframe(df_stats, use_container_width=True)
+
+
+
+
+        # --- SECCIÓN EXTRA: CREADOR DE GRÁFICAS (SELF-SERVICE) ---
+    st.write("---")
+    st.subheader("🎨 Zona de Experimentación")
+    st.write("Crea tus propias comparativas eligiendo las variables.")
+
+    with st.expander("🛠️ Abrir Creador de Gráficas"):
+        
+        # 1. FILTROS PREVIOS
+        # Permitimos filtrar por posición para no mezclar Porteros con Delanteros si no se quiere
+        posiciones_disponibles = df_stats['Posición'].unique().tolist()
+        posiciones_sel = st.multiselect("Filtrar por Posición:", posiciones_disponibles, default=posiciones_disponibles)
+        
+        # Filtramos el DF
+        df_custom = df_stats[df_stats['Posición'].isin(posiciones_sel)]
+        
+        col1, col2, col3 = st.columns(3)
+        
+        # 2. SELECTORES DE EJES
+        # Obtenemos las columnas disponibles
+        columnas = df_custom.columns.tolist()
+        
+        with col1:
+            eje_x = st.selectbox("Eje X (Horizontal)", columnas, index=columnas.index('Nombre') if 'Nombre' in columnas else 0)
+        
+        with col2:
+            # Por defecto intentamos poner 'Goles' o la última columna
+            idx_def = columnas.index('Goles') if 'Goles' in columnas else len(columnas)-1
+            eje_y = st.selectbox("Eje Y (Vertical)", columnas, index=idx_def)
             
-            if val1 != val2:
-                if (es_mejor_alto and val1 > val2) or (not es_mejor_alto and val1 < val2):
-                    color_p1 = "off" # Streamlit usa "off" o "inverse" para resaltar verde en deltas
-                    color_p2 = "normal" # Rojo/Gris
-                else:
-                    color_p1 = "normal"
-                    color_p2 = "off"
+        with col3:
+            tipo_grafico = st.selectbox("Tipo de Gráfico", ["Barras", "Dispersión (Scatter)", "Línea"])
+            
+        # Selector opcional de color
+        color_by = st.checkbox("¿Colorear por Posición?", value=True)
+        col_color = 'Posición' if color_by else None
 
-            c_p1.metric(label, int(val1), delta=int(delta_1), delta_color=color_p1)
-            c_p2.metric(label, int(val2), delta=int(delta_2), delta_color=color_p2)
-            c_metric.markdown(f"<h3 style='text-align: center; vertical-align: middle; margin-top: 20px'>{label}</h3>", unsafe_allow_html=True)
-
-        # Renderizar métricas
-        mostrar_comparacion("Minutos Totales", stats_p1['Minutos totales'], stats_p2['Minutos totales'])
-        st.write("") # Espaciador
-        mostrar_comparacion("Goles", stats_p1['Goles'], stats_p2['Goles'])
-        st.write("")
-        mostrar_comparacion("Amarillas", stats_p1['Amarillas'], stats_p2['Amarillas'], es_mejor_alto=False) # Menos es mejor
-
-        # 2. GRÁFICO DE BARRAS COMPARATIVO
-        st.write("")
-        st.write("")
+        # 3. GENERACIÓN DEL GRÁFICO
+        st.write(f"📊 Mostrando: **{eje_y}** por **{eje_x}**")
         
-        fig_comp = go.Figure()
-        metricas = ['Min. Titular', 'Min. Suplente', 'Goles (x100)', 'Amarillas (x100)']
-        
-        # Escalamos goles y amarillas x100 solo para que se vean en la gráfica junto a los minutos
-        # (Esto es un truco visual, puedes quitarlo si prefieres normalizar de otra forma)
-        vals_1 = [stats_p1['Minutos titular'].values[0], stats_p1['Minutos suplente'].values[0], stats_p1['Goles'].values[0]*100, stats_p1['Amarillas'].values[0]*100]
-        vals_2 = [stats_p2['Minutos titular'].values[0], stats_p2['Minutos suplente'].values[0], stats_p2['Goles'].values[0]*100, stats_p2['Amarillas'].values[0]*100]
+        if tipo_grafico == "Barras":
+            fig_custom = px.bar(
+                df_custom, x=eje_x, y=eje_y, 
+                color=col_color, 
+                text_auto=True,
+                template="plotly_dark",
+                title=f"{eje_y} vs {eje_x}"
+            )
+            # Si son barras, ordenamos descendente para que quede bonito
+            fig_custom.update_layout(xaxis={'categoryorder':'total descending'})
+            
+        elif tipo_grafico == "Dispersión (Scatter)":
+            fig_custom = px.scatter(
+                df_custom, x=eje_x, y=eje_y, 
+                color=col_color,
+                size=eje_y, # Hacemos que las burbujas sean más grandes si el valor Y es mayor
+                hover_name="Nombre",
+                template="plotly_dark",
+                title=f"Correlación: {eje_x} vs {eje_y}"
+            )
+            
+        elif tipo_grafico == "Línea":
+            # Ordenamos por X para que la línea tenga sentido
+            df_line = df_custom.sort_values(eje_x)
+            fig_custom = px.line(
+                df_line, x=eje_x, y=eje_y, 
+                markers=True,
+                template="plotly_dark",
+                title=f"Tendencia: {eje_y} por {eje_x}"
+            )
 
-        fig_comp.add_trace(go.Bar(name=p1, x=metricas, y=vals_1, marker_color='#3498db'))
-        fig_comp.add_trace(go.Bar(name=p2, x=metricas, y=vals_2, marker_color='#e74c3c'))
-
-        fig_comp.update_layout(barmode='group', title="Comparativa Directa", template="plotly_dark")
-        st.plotly_chart(fig_comp, use_container_width=True)
-        st.caption("*Nota: Goles y Amarillas multiplicados x100 para visibilidad gráfica")
-
-
-        # --- EXTRA 1: RADAR CHART (Sustituye el gráfico de barras del comparador por esto) ---
-        st.write("---")
-        st.subheader("🕸️ Comparativa Visual (Radar)")
-        
-        # 1. Normalización de datos (0-100) respecto al MÁXIMO DEL EQUIPO
-        # Esto es vital para que el gráfico se vea bien
-        def normalizar(valor, columna):
-            max_val = df_stats[columna].max()
-            if max_val == 0: return 0
-            return (valor / max_val) * 100
-
-        metricas_radar = ['Minutos totales', 'Goles', '% Jugado (Total)', 'Titular']
-        nombres_radar = ['Minutos', 'Goles', '% Participación', 'Titularidades']
-        
-        vals_p1_norm = [normalizar(stats_p1[m].values[0], m) for m in metricas_radar]
-        vals_p2_norm = [normalizar(stats_p2[m].values[0], m) for m in metricas_radar]
-        
-        # Cerrar el círculo del radar añadiendo el primer valor al final
-        vals_p1_norm += [vals_p1_norm[0]]
-        vals_p2_norm += [vals_p2_norm[0]]
-        nombres_radar += [nombres_radar[0]]
-
-        fig_radar = go.Figure()
-
-        fig_radar.add_trace(go.Scatterpolar(
-              r=vals_p1_norm,
-              theta=nombres_radar,
-              fill='toself',
-              name=p1,
-              line_color='#3498db'
-        ))
-        fig_radar.add_trace(go.Scatterpolar(
-              r=vals_p2_norm,
-              theta=nombres_radar,
-              fill='toself',
-              name=p2,
-              line_color='#e74c3c'
-        ))
-
-        fig_radar.update_layout(
-          polar=dict(
-            radialaxis=dict(
-              visible=True,
-              range=[0, 100] # Siempre de 0 a 100% relativo al equipo
-            )),
-          showlegend=True,
-          template="plotly_dark",
-          title="Comparativa Relativa (Escala 0-100 sobre el mejor del equipo)"
-        )
-        st.plotly_chart(fig_radar, use_container_width=True)
-
-
-        # --- EXTRA 1: GRÁFICO DE EFICIENCIA (SCATTER PLOT) ---
-        st.subheader("🎯 Eficiencia: Goles vs Minutos")
-        
-        # Filtramos para no ensuciar el gráfico con gente que no juega
-        df_eficiencia = df_stats[df_stats['Minutos totales'] > 90].copy() 
-        
-        # Calculamos Goles por 90 min para el tamaño de la burbuja o el color
-        df_eficiencia['Goles_90'] = (df_eficiencia['Goles'] / df_eficiencia['Minutos totales']) * 90
-        
-        fig_eff = px.scatter(df_eficiencia, 
-                            x='Minutos totales', 
-                            y='Goles',
-                            size='Goles_90', # El tamaño de la bola es su promedio goleador
-                            color='Goles',
-                            hover_name=df_eficiencia["Nombre"],
-                            text=df_eficiencia["Nombre"],
-                            title="Relación Minutos jugados vs Goles marcados (Tamaño = Goles/90min)",
-                            labels={'min_tot': 'Minutos Totales', 'goles': 'Goles Totales'},
-                            template="plotly_dark")
-        
-        fig_eff.update_traces(textposition='top center')
-        st.plotly_chart(fig_eff, use_container_width=True)
-
-
-
-        
-        # --- EXTRA 3: RACHA ÚLTIMOS 5 PARTIDOS ---
-        st.subheader("🔥 Estado de Forma (Últimos 5 partidos)")
-        
-        # SELECCIONAR LOS ÚLTIMOS 5 PARTIDOS JUGADOS HASTA HOY
-        # Filtramos jornadas anteriores o iguales a la actual y cogemos las últimas 5
-        datos_jugador['Jornada'] = pd.to_numeric(datos_jugador['Jornada'], errors='coerce')
-        last_5_df = datos_jugador[datos_jugador['Jornada'] <= jornada_actual].sort_values('Jornada').tail(5)
-
-        # CÁLCULOS
-        # Calculamos la suma de minutos (T + S) fila a fila
-        last_5_df['Minutos_Partido'] = last_5_df['T'] + last_5_df['S']
-
-        min_last_5 = last_5_df['Minutos_Partido'].sum()
-        # Calculamos el máximo posible basándonos en cuántos partidos ha encontrado (pueden ser menos de 5 si estamos en la jornada 3)
-        num_partidos_rango = len(last_5_df)
-        max_possible_5 = num_partidos_rango * t_partido 
-
-        if max_possible_5 > 0:
-            pct_forma = (min_last_5 / max_possible_5) * 100
-        else:
-            pct_forma = 0
-
-        # VISUALIZACIÓN
-        c_forma1, c_forma2 = st.columns([1, 3])
-
-        # Usamos int() para limpiar el visualizado
-        c_forma1.metric("Minutos (Últ. 5)", int(min_last_5), f"{int(pct_forma)}% Disp.")
-
-        # Mini gráfico de tendencia (Sparkline)
-        # Usamos el DF last_5_df que ya tiene los datos listos
-        fig_spark = px.line(last_5_df,x='Jornada', y='Minutos_Partido', markers=True, template="plotly_dark", title="Tendencia de minutos")
-
-        fig_spark.update_layout(height=150, margin=dict(l=20, r=20, t=30, b=20), yaxis_range=[0, 100], # Un poco más de 90 para que no corte el punto
-            xaxis=dict(tickmode='linear', dtick=1, tickprefix="J")) # Para que ponga J11, J12...
-        c_forma2.plotly_chart(fig_spark, use_container_width=True)
-        
-
-        # ... tu código de carga y cálculos donde generas df_stats ...
-
-        st.subheader("Verificación de Datos Calculados (df_stats)")
-
-        # Opción Recomendada: Tabla interactiva (puedes ordenar y filtrar)
-        st.dataframe(df_stats, use_container_width=True)
-
+        st.plotly_chart(fig_custom, use_container_width=True)
